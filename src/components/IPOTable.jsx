@@ -1,106 +1,161 @@
-const COLS = [
-  'Company',
-  'Sector / Product',
-  'Exchange',
-  'IPO Date',
-  'Price Range',
-  'Est. Valuation',
-  'Secondary Mkt',
-  'Status',
-  'Source',
-]
+import { useState, useMemo } from 'react'
+import TableFilters from './TableFilters'
 
-function SkeletonRows({ cols }) {
-  return Array.from({ length: 5 }).map((_, i) => (
-    <tr key={i} className="loading-rows">
-      {Array.from({ length: cols }).map((_, j) => (
-        <td key={j}>
-          <div className={`skeleton skeleton-${['md','sm','xs','sm','xs','xs','xs','xs','xs'][j] || 'sm'}`} />
-        </td>
-      ))}
-    </tr>
-  ))
+function fmtDate(s) {
+  if (!s) return '—'
+  try {
+    return new Date(s).toLocaleDateString('en-GB', {
+      day: '2-digit', month: 'short', year: 'numeric'
+    })
+  } catch { return s }
 }
 
-function statusClass(status) {
-  if (!status) return 'status-filed'
-  const s = status.toLowerCase()
-  if (s === 'expected') return 'status-expected'
-  if (s === 'priced')   return 'status-priced'
-  if (s === 'filed')    return 'status-filed'
-  if (s === 'withdrawn') return 'status-withdrawn'
+function fmtVal(n) {
+  if (!n || n <= 0) return '—'
+  if (n >= 1e9) return `$${(n / 1e9).toFixed(1)}B`
+  if (n >= 1e6) return `$${(n / 1e6).toFixed(0)}M`
+  return `$${n.toLocaleString()}`
+}
+
+function statusClass(s) {
+  const v = (s || '').toLowerCase()
+  if (v === 'priced')    return 'status-priced'
+  if (v === 'expected')  return 'status-expected'
+  if (v === 'withdrawn') return 'status-withdrawn'
   return 'status-filed'
 }
 
-function fmtDate(dateStr) {
-  if (!dateStr) return '—'
-  try {
-    return new Date(dateStr).toLocaleDateString('en-GB', {
-      day: '2-digit', month: 'short', year: 'numeric'
-    })
-  } catch { return dateStr }
+function valBucket(n) {
+  if (!n || n <= 0) return 'Unknown'
+  if (n < 100e6)   return 'Under $100M'
+  if (n < 500e6)   return '$100M–$500M'
+  if (n < 1e9)     return '$500M–$1B'
+  if (n < 5e9)     return '$1B–$5B'
+  return 'Over $5B'
 }
 
-function fmtVal(num) {
-  if (!num || num <= 0) return '—'
-  if (num >= 1e9) return `$${(num / 1e9).toFixed(1)}B`
-  if (num >= 1e6) return `$${(num / 1e6).toFixed(0)}M`
-  return `$${num.toLocaleString()}`
-}
+const SKELETON_COUNT = 6
 
 export default function IPOTable({ data, loading, error }) {
-  if (error) {
-    return (
-      <table>
-        <thead><tr>{COLS.map(c => <th key={c}>{c}</th>)}</tr></thead>
-        <tbody>
-          <tr><td colSpan={COLS.length} className="table-empty">
-            Failed to load: {error}
-          </td></tr>
-        </tbody>
-      </table>
-    )
-  }
+  const [filters, setFilters] = useState({})
+
+  // Build filter options from live data
+  const filterDefs = useMemo(() => [
+    {
+      key: 'sector',
+      label: 'Sector',
+      options: [...new Set(data.map(d => d.sector).filter(Boolean).filter(v => v !== '—'))].sort(),
+    },
+    {
+      key: 'exchange',
+      label: 'Exchange',
+      options: [...new Set(data.map(d => d.exchange).filter(Boolean).filter(v => v !== '—'))].sort(),
+    },
+    {
+      key: 'status',
+      label: 'Status',
+      options: [...new Set(data.map(d => (d.status || 'filed')))].sort(),
+    },
+    {
+      key: '_valBucket',
+      label: 'Valuation',
+      options: ['Under $100M', '$100M–$500M', '$500M–$1B', '$1B–$5B', 'Over $5B'],
+    },
+    {
+      key: 'source',
+      label: 'Source',
+      options: [...new Set(data.map(d => d.source).filter(Boolean))],
+    },
+  ], [data])
+
+  const filtered = useMemo(() => {
+    return data.filter(d => {
+      for (const [key, val] of Object.entries(filters)) {
+        if (!val) continue
+        if (key === '_valBucket') {
+          if (valBucket(d.totalSharesValue) !== val) return false
+        } else if (key === 'status') {
+          if ((d.status || 'filed') !== val) return false
+        } else if (String(d[key]) !== val) {
+          return false
+        }
+      }
+      return true
+    })
+  }, [data, filters])
+
+  if (error) return (
+    <div className="table-error">Failed to load: {error}</div>
+  )
 
   return (
-    <table>
-      <thead>
-        <tr>{COLS.map(c => <th key={c}>{c}</th>)}</tr>
-      </thead>
-      <tbody>
-        {loading ? (
-          <SkeletonRows cols={COLS.length} />
-        ) : data.length === 0 ? (
-          <tr>
-            <td colSpan={COLS.length} className="table-empty">
-              No IPO filings found for this period.
-            </td>
-          </tr>
-        ) : (
-          data.map((ipo, i) => (
-            <tr key={i}>
-              <td>
-                <span className="cell-name">{ipo.name}</span>
-                {ipo.symbol && <span className="cell-ticker">{ipo.symbol}</span>}
-              </td>
-              <td className="cell-muted">{ipo.sector || '—'}</td>
-              <td className="cell-muted">{ipo.exchange || '—'}</td>
-              <td className="cell-value">{fmtDate(ipo.date)}</td>
-              <td className="cell-value">{ipo.priceRange || '—'}</td>
-              <td className="cell-value">{fmtVal(ipo.totalSharesValue)}</td>
-              <td className="cell-na">Forge / NPM API reqd.</td>
-              <td>
-                <span className={`status ${statusClass(ipo.status)}`}>
-                  {ipo.status
-                    ? ipo.status.charAt(0).toUpperCase() + ipo.status.slice(1)
-                    : 'Filed'}
-                </span>
-              </td>
-              <td><span className="source-tag">{ipo.source}</span></td>
+    <div className="table-section">
+      {!loading && data.length > 0 && (
+        <TableFilters
+          defs={filterDefs}
+          values={filters}
+          onChange={setFilters}
+          count={filtered.length}
+          total={data.length}
+        />
+      )}
+      <div className="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Company</th>
+              <th>Sector</th>
+              <th>Exchange</th>
+              <th>IPO Date</th>
+              <th>Price Range</th>
+              <th>Est. Valuation</th>
+              <th>Secondary Mkt</th>
+              <th>Status</th>
+              <th>Source</th>
             </tr>
-          ))
-        )}
-      </tbody>
-    </table>
+          </thead>
+          <tbody>
+            {loading ? (
+              Array.from({ length: SKELETON_COUNT }).map((_, i) => (
+                <tr key={i} className="loading-rows">
+                  {[80, 60, 40, 55, 40, 45, 50, 45, 40].map((w, j) => (
+                    <td key={j}><div className="skeleton" style={{ width: `${w}%` }} /></td>
+                  ))}
+                </tr>
+              ))
+            ) : filtered.length === 0 ? (
+              <tr>
+                <td colSpan={9} className="table-empty">
+                  {data.length === 0
+                    ? 'No IPO filings found for this period.'
+                    : 'No results match the current filters.'}
+                </td>
+              </tr>
+            ) : (
+              filtered.map((ipo, i) => (
+                <tr key={i}>
+                  <td>
+                    <span className="cell-name">{ipo.name}</span>
+                    {ipo.symbol && <span className="cell-ticker">{ipo.symbol}</span>}
+                  </td>
+                  <td className="cell-muted">{ipo.sector || '—'}</td>
+                  <td className="cell-muted">{ipo.exchange || '—'}</td>
+                  <td className="cell-value">{fmtDate(ipo.date)}</td>
+                  <td className="cell-value">{ipo.priceRange || '—'}</td>
+                  <td className="cell-value">{fmtVal(ipo.totalSharesValue)}</td>
+                  <td className="cell-na">Requires Forge / NPM API</td>
+                  <td>
+                    <span className={`status ${statusClass(ipo.status)}`}>
+                      {(ipo.status || 'filed').charAt(0).toUpperCase() + (ipo.status || 'filed').slice(1)}
+                    </span>
+                  </td>
+                  <td><span className="source-tag">{ipo.source}</span></td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
   )
 }

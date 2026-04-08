@@ -1,77 +1,152 @@
 // api/funding.js
-// Blends SEC EDGAR Form D (parsed XML for amounts > $100M)
-// with Finnhub news filtered for large funding announcements.
-// Cache: 1 hour via Vercel CDN
+// SEC EDGAR Form D (XML parsed via filing index) + Finnhub news filtering
+// Accepts: ?period=1w|1m|3m|6m
+// Filters for rounds >= $100M
+// Cache: 1hr Vercel CDN
 
-const MIN_AMOUNT = 100_000_000 // $100M threshold
+const MIN_AMOUNT = 100_000_000
 
-function subDays(date, n) {
-  const d = new Date(date)
-  d.setDate(d.getDate() - n)
-  return d.toISOString().split('T')[0]
+// EDGAR Form D industry group codes → readable labels
+const INDUSTRY_MAP = {
+  'Agriculture': 'Agriculture',
+  'Banking': 'Financial Services',
+  'Business Services': 'Business Services',
+  'Coal Mining': 'Energy & Mining',
+  'Commercial Banking': 'Financial Services',
+  'Communications': 'Technology & Telecom',
+  'Computers': 'Technology',
+  'Construction': 'Real Estate & Construction',
+  'Electric Utilities': 'Utilities',
+  'Electronic & Electrical Equipment': 'Technology',
+  'Finance': 'Financial Services',
+  'Health Care': 'Healthcare',
+  'Health Insurance': 'Healthcare',
+  'Hotels and Motels': 'Consumer & Hospitality',
+  'Insurance': 'Financial Services',
+  'Investment Funds': 'Asset Management',
+  'Investments': 'Asset Management',
+  'Manufacturing': 'Industrials',
+  'Oil and Gas': 'Energy',
+  'Pharmaceuticals': 'Healthcare & Pharma',
+  'Real Estate': 'Real Estate',
+  'Restaurants': 'Consumer & Hospitality',
+  'Retail': 'Consumer Retail',
+  'Software': 'Technology',
+  'Technology': 'Technology',
+  'Transportation': 'Transportation',
+  'Other': 'Diversified',
+  'Pooled Investment Fund': 'Asset Management',
 }
 
-// ─── EDGAR Form D ────────────────────────────────────────────────────────────
-// Strategy:
-//   1. Fetch recent Form D filing index from EDGAR EFTS
-//   2. For each, fetch the primary XML document
-//   3. Parse totalOfferingAmount from the XML
-//   4. Return those > MIN_AMOUNT
+function isoDate(d) { return d.toISOString().split('T')[0] }
 
-async function fetchEdgarFormD() {
-  const today = new Date()
-  const from  = subDays(today, 90)
+function shiftDate(base, days) {
+  const d = new Date(base)
+  d.setDate(d.getDate() - days)
+  return isoDate(d)
+}
 
-  const searchUrl =
-    `https://efts.sec.gov/LATEST/search-index?forms=D&dateRange=custom&startdt=${from}` +
-    `&enddt=${today.toISOString().split('T')[0]}&hits.hits._source=entity_name,file_date,accession_no,period_of_report`
+function periodToDays(period) {
+  return { '1w': 7, '1m': 30, '3m': 90, '6m': 180 }[period] ?? 30
+}
 
-  const searchRes = await fetch(searchUrl, {
-    headers: { 'User-Agent': 'FlowValueDealsTracker contact@flowvalue.io' }
+// ─── EDGAR Form D ─────────────────────────────────────────────────────────────
+
+async function parseFormDXml(cik, accWithDashes) {
+  // Step 1: fetch the filing index to find the actual XML document name
+  const accNoDashes = accWithDashes.replace(/-/g, '')
+  const indexUrl =
+    `https://www.sec.gov/Archives/edgar/data/${cik}/${accNoDashes}/${accWithDashes}-index.json`
+
+  let xmlFilename = 'primary_doc.xml' // fallback
+
+  try {
+    const idxRes = await fetch(indexUrl, {
+      headers: { 'User-Agent': 'FlowValueDealsTracker contact@flowvalue.io' },
+      signal: AbortSignal.timeout(4000)
+    })
+    if (idxRes.ok) {
+      const idx = await idxRes.json()
+      const xmlDoc = (idx.documents || []).find(
+        d => d.type === 'D' || d.documentUrl?.endsWith('.xml')
+      )
+      if (xmlDoc?.documentUrl) {
+        const parts = xmlDoc.documentUrl.split('/')
+        xmlFilename = parts[parts.length - 1]
+      }
+    }
+  } catch { /* use fallback */ }
+
+  // Step 2: fetch and parse the XML
+  const xmlUrl =
+    `https://www.sec.gov/Archives/edgar/data/${cik}/${accNoDashes}/${xmlFilename}`
+
+  const xmlRes = await fetch(xmlUrl, {
+    headers: { 'User-Agent': 'FlowValueDealsTracker contact@flowvalue.io' },
+    signal: AbortSignal.timeout(5000)
   })
+  if (!xmlRes.ok) return null
+  const xml = await xmlRes.text()
+
+  // Parse totalOfferingAmount — Form D XML tag
+  const amtMatch = xml.match(/<totalOfferingAmount>([\d.]+)<\/totalOfferingAmount>/i)
+  if (!amtMatch) return null
+  const amount = parseFloat(amtMatch[1])
+  if (isNaN(amount) || amount < MIN_AMOUNT) return null
+
+  // Parse industry group type
+  const indMatch = xml.match(/<industryGroupType>(.*?)<\/industryGroupType>/i)
+  const rawIndustry = indMatch ? indMatch[1].trim() : 'Other'
+
+  // Parse issuer name from XML (more reliable than search index)
+  const nameMatch = xml.match(/<issuerName>(.*?)<\/issuerName>/i)
+  const issuerName = nameMatch ? nameMatch[1].trim() : null
+
+  // Parse total amount sold (actual raised vs offered)
+  const soldMatch = xml.match(/<totalAmountSold>([\d.]+)<\/totalAmountSold>/i)
+  const amountSold = soldMatch ? parseFloat(soldMatch[1]) : amount
+
+  return {
+    amount,
+    amountSold,
+    industry: INDUSTRY_MAP[rawIndustry] ?? rawIndustry,
+    issuerName,
+  }
+}
+
+async function fetchEdgarFormD(days) {
+  const today = new Date()
+  const from  = shiftDate(today, days)
+
+  const searchRes = await fetch(
+    `https://efts.sec.gov/LATEST/search-index?forms=D` +
+    `&dateRange=custom&startdt=${from}&enddt=${isoDate(today)}`,
+    { headers: { 'User-Agent': 'FlowValueDealsTracker contact@flowvalue.io' } }
+  )
   if (!searchRes.ok) return []
+
   const searchData = await searchRes.json()
+  const hits = (searchData.hits?.hits || []).slice(0, 80)
 
-  const hits = (searchData.hits?.hits || []).slice(0, 60) // limit to avoid excessive fetches
-
-  // Fetch XML for each filing and parse offering amount
   const results = await Promise.allSettled(
     hits.map(async hit => {
-      const src       = hit._source
-      const accession = src.accession_no?.replace(/-/g, '')
-      if (!accession) return null
+      const src          = hit._source || {}
+      const accWithDashes = hit._id || ''                       // e.g. "0001234567-24-000001"
+      const cikPadded    = accWithDashes.split('-')[0] || ''    // e.g. "0001234567"
+      const cik          = cikPadded.replace(/^0+/, '')         // e.g. "1234567"
 
-      // Derive CIK from accession number (first 10 digits)
-      const cik = accession.slice(0, 10).replace(/^0+/, '')
-      const xmlUrl = `https://www.sec.gov/Archives/edgar/data/${cik}/${accession}/primary_doc.xml`
+      if (!cik || !accWithDashes) return null
 
-      const xmlRes = await fetch(xmlUrl, {
-        headers: { 'User-Agent': 'FlowValueDealsTracker contact@flowvalue.io' }
-      })
-      if (!xmlRes.ok) return null
-      const xml = await xmlRes.text()
-
-      // Parse totalOfferingAmount
-      const amtMatch = xml.match(/<totalOfferingAmount>([\d.]+)<\/totalOfferingAmount>/i)
-      if (!amtMatch) return null
-      const amount = parseFloat(amtMatch[1])
-      if (isNaN(amount) || amount < MIN_AMOUNT) return null
-
-      // Parse issuer name from XML (more reliable than index)
-      const nameMatch = xml.match(/<issuerName>(.*?)<\/issuerName>/i)
-      const issuerName = nameMatch
-        ? nameMatch[1].trim()
-        : src.entity_name || 'Unknown'
-
-      // Parse industry description if present
-      const industryMatch = xml.match(/<industryGroupType>(.*?)<\/industryGroupType>/i)
+      const parsed = await parseFormDXml(cik, accWithDashes)
+      if (!parsed) return null
 
       return {
-        name:        issuerName,
-        amount,
-        valuation:   null, // not in Form D
+        name:        parsed.issuerName || src.entity_name || 'Unknown',
+        amount:      parsed.amount,
+        amountSold:  parsed.amountSold,
+        valuation:   null,
         date:        src.file_date,
-        industry:    industryMatch ? industryMatch[1].trim() : '—',
+        industry:    parsed.industry,
         description: 'Private Placement (Reg D)',
         source:      'SEC Form D',
       }
@@ -85,59 +160,56 @@ async function fetchEdgarFormD() {
 }
 
 // ─── Finnhub news ─────────────────────────────────────────────────────────────
-// Filters market news for funding announcement keywords and extracts amounts.
 
 const FUNDING_KEYWORDS = [
-  'raises', 'raised', 'secures', 'closes', 'funding round',
-  'series a', 'series b', 'series c', 'series d', 'series e',
-  'venture round', 'growth equity', 'private equity round',
+  'raises', 'raised', 'secures', 'series a', 'series b', 'series c',
+  'series d', 'series e', 'funding round', 'growth equity', 'venture round',
 ]
 
-const AMOUNT_REGEX = /\$(\d+(?:\.\d+)?)\s*(billion|million|bn|m)\b/gi
+const AMT_RE = /\$(\d+(?:\.\d+)?)\s*(billion|million|bn|m)\b/gi
 
 function extractAmount(text) {
   let max = 0
-  let match
-  AMOUNT_REGEX.lastIndex = 0
-  while ((match = AMOUNT_REGEX.exec(text)) !== null) {
-    const val  = parseFloat(match[1])
-    const unit = match[2].toLowerCase()
-    const usd  = (unit === 'billion' || unit === 'bn') ? val * 1e9 : val * 1e6
+  let m
+  AMT_RE.lastIndex = 0
+  while ((m = AMT_RE.exec(text)) !== null) {
+    const v = parseFloat(m[1])
+    const u = m[2].toLowerCase()
+    const usd = (u === 'billion' || u === 'bn') ? v * 1e9 : v * 1e6
     if (usd > max) max = usd
   }
   return max
 }
 
-async function fetchFinnhubFundingNews(apiKey) {
-  const url = `https://finnhub.io/api/v1/news?category=general&token=${apiKey}`
-  const res = await fetch(url)
-  if (!res.ok) return []
-  const articles = await res.json()
+async function fetchFinnhubDeals(apiKey) {
+  const r = await fetch(
+    `https://finnhub.io/api/v1/news?category=general&token=${apiKey}`
+  )
+  if (!r.ok) return []
+  const articles = await r.json()
 
   const deals = []
+  for (const a of articles || []) {
+    const text = ((a.headline || '') + ' ' + (a.summary || '')).toLowerCase()
+    if (!FUNDING_KEYWORDS.some(kw => text.includes(kw))) continue
 
-  for (const article of articles || []) {
-    const text = ((article.headline || '') + ' ' + (article.summary || '')).toLowerCase()
-    const hasFundingKeyword = FUNDING_KEYWORDS.some(kw => text.includes(kw))
-    if (!hasFundingKeyword) continue
-
-    const amount = extractAmount(article.headline + ' ' + (article.summary || ''))
+    const amount = extractAmount((a.headline || '') + ' ' + (a.summary || ''))
     if (amount < MIN_AMOUNT) continue
 
-    // Best-effort company name: first capitalized noun phrase in headline
-    const nameMatch = article.headline?.match(/^([A-Z][A-Za-z0-9&\s,.']+?)\s+(?:raises|raised|secures|closes)/i)
+    const nameMatch = (a.headline || '').match(
+      /^([A-Z][A-Za-z0-9&\s,.']+?)\s+(?:raises|raised|secures|closes)/i
+    )
 
     deals.push({
-      name:        nameMatch ? nameMatch[1].trim() : article.related || 'Undisclosed',
+      name:        nameMatch ? nameMatch[1].trim() : (a.related || 'Undisclosed'),
       amount,
+      amountSold:  amount,
       valuation:   null,
-      date:        article.datetime
-        ? new Date(article.datetime * 1000).toISOString().split('T')[0]
-        : null,
+      date:        a.datetime ? new Date(a.datetime * 1000).toISOString().split('T')[0] : null,
       industry:    '—',
-      description: article.headline?.slice(0, 80) + (article.headline?.length > 80 ? '…' : ''),
+      description: (a.headline || '').slice(0, 90),
       source:      'Finnhub News',
-      url:         article.url,
+      url:         a.url,
     })
   }
 
@@ -147,29 +219,27 @@ async function fetchFinnhubFundingNews(apiKey) {
 // ─── Handler ──────────────────────────────────────────────────────────────────
 
 export default async function handler(req, res) {
-  try {
-    const FINNHUB_KEY = process.env.FINNHUB_API_KEY
+  const { period = '1m' } = req.query
+  const days = periodToDays(period)
 
-    const [edgarResult, finnhubResult] = await Promise.allSettled([
-      fetchEdgarFormD(),
-      FINNHUB_KEY ? fetchFinnhubFundingNews(FINNHUB_KEY) : Promise.resolve([]),
+  try {
+    const KEY = process.env.FINNHUB_API_KEY
+
+    const [edgarRes, finnRes] = await Promise.allSettled([
+      fetchEdgarFormD(days),
+      KEY ? fetchFinnhubDeals(KEY) : Promise.resolve([]),
     ])
 
-    const edgarDeals   = edgarResult.status  === 'fulfilled' ? edgarResult.value   : []
-    const finnhubDeals = finnhubResult.status === 'fulfilled' ? finnhubResult.value : []
+    const edgarDeals = edgarRes.status === 'fulfilled' ? edgarRes.value : []
+    const finnDeals  = finnRes.status  === 'fulfilled' ? finnRes.value  : []
 
-    // Deduplicate by company name (case-insensitive)
     const seen  = new Set(edgarDeals.map(d => d.name.toLowerCase().trim()))
-    const extra = finnhubDeals.filter(d => !seen.has(d.name.toLowerCase().trim()))
+    const extra = finnDeals.filter(d => !seen.has(d.name.toLowerCase().trim()))
 
     const deals = [...edgarDeals, ...extra].sort((a, b) => b.amount - a.amount)
 
     res.setHeader('Cache-Control', 's-maxage=3600, stale-while-revalidate=7200')
-    res.status(200).json({
-      deals,
-      count:   deals.length,
-      sources: ['SEC EDGAR Form D', 'Finnhub News'],
-    })
+    res.status(200).json({ deals, count: deals.length })
   } catch (err) {
     console.error('[api/funding]', err)
     res.status(500).json({ error: err.message, deals: [] })

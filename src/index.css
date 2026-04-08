@@ -359,3 +359,237 @@ tbody tr:hover {
   .table-wrap { overflow-x: auto; }
   table { min-width: 700px; }
 }
+
+/* ─── Filter shell (landing state) ─── */
+.filter-shell {
+  display: flex;
+  justify-content: center;
+}
+
+.filter-card {
+  width: 100%;
+  max-width: 700px;
+  background: var(--surface);
+  border: 1px solid var(--border-mid);
+  border-radius: 10px;
+  padding: 32px 36px;
+}
+
+.filter-card-header {
+  margin-bottom: 28px;
+}
+
+.filter-card-title {
+  display: block;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--text);
+  margin-bottom: 6px;
+}
+
+.filter-card-sub {
+  font-size: 13px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.filter-form {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.filter-group {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.filter-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+/* pill radio buttons */
+.filter-pills {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.pill-radio {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.pill-label {
+  cursor: pointer;
+}
+
+.pill {
+  display: inline-block;
+  padding: 7px 18px;
+  border-radius: 40px;
+  font-size: 13px;
+  font-weight: 500;
+  border: 1px solid var(--border-mid);
+  color: var(--text-sub);
+  background: transparent;
+  transition: border-color 0.12s, color 0.12s, background 0.12s;
+  user-select: none;
+}
+
+.pill-radio:checked + .pill {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-dim);
+}
+
+.pill-label:hover .pill {
+  border-color: rgba(233, 233, 221, 0.3);
+  color: var(--text);
+}
+
+.btn-run {
+  background: var(--accent);
+  color: #1A1F2B;
+  border: none;
+  font-family: var(--font);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  padding: 12px 28px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  align-self: flex-start;
+  transition: opacity 0.15s;
+}
+
+.btn-run:hover:not(:disabled) {
+  opacity: 0.88;
+}
+
+.btn-run:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ─── Results area ─── */
+.results {
+  display: flex;
+  flex-direction: column;
+  gap: 52px;
+}
+
+/* ─── Table section wrapper ─── */
+.table-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+/* ─── Table filters row ─── */
+.tfilter-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 0;
+  flex-wrap: wrap;
+}
+
+.tfilter-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  flex: 1;
+}
+
+.tfilter-select {
+  background: var(--surface);
+  border: 1px solid var(--border-mid);
+  color: var(--text-muted);
+  font-family: var(--font);
+  font-size: 12px;
+  padding: 5px 10px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  outline: none;
+  transition: border-color 0.12s, color 0.12s;
+  appearance: none;
+  padding-right: 24px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%23888' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+}
+
+.tfilter-select:hover,
+.tfilter-select:focus {
+  border-color: var(--border-mid);
+  color: var(--text);
+}
+
+.tfilter-select.tfilter-active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.tfilter-clear {
+  background: transparent;
+  border: 1px solid rgba(196, 101, 90, 0.4);
+  color: var(--red);
+  font-family: var(--font);
+  font-size: 11px;
+  font-weight: 500;
+  padding: 5px 10px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: border-color 0.12s;
+}
+
+.tfilter-clear:hover { border-color: var(--red); }
+
+.tfilter-count {
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  margin-left: auto;
+}
+
+/* ─── Misc cell helpers ─── */
+.cell-link {
+  color: inherit;
+  text-decoration: none;
+}
+
+.cell-link:hover {
+  color: var(--accent);
+}
+
+.cell-desc {
+  max-width: 260px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.accent { color: var(--accent); }
+
+.table-error {
+  padding: 20px;
+  color: var(--red);
+  font-size: 13px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
