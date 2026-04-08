@@ -593,3 +593,110 @@ tbody tr:hover {
   border: 1px solid var(--border);
   border-radius: var(--radius);
 }
+
+/* ─── TH tooltip (status column) ─── */
+.th-tooltip-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.th-info {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 1px solid var(--border-mid);
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--text-muted);
+  cursor: default;
+  line-height: 1;
+  transition: border-color 0.12s, color 0.12s;
+}
+
+.th-tooltip-wrap:hover .th-info {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.th-tooltip {
+  position: absolute;
+  top: calc(100% + 10px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 200;
+  background: var(--surface-2);
+  border: 1px solid var(--border-mid);
+  border-radius: 8px;
+  padding: 14px 16px;
+  width: 360px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+  pointer-events: none;
+}
+
+.th-tooltip-title {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 10px;
+}
+
+.th-tooltip-row {
+  display: grid;
+  grid-template-columns: 8px 72px 1fr;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.th-tooltip-row:last-child { margin-bottom: 0; }
+
+.th-tooltip-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  margin-top: 5px;
+  flex-shrink: 0;
+}
+
+.th-tooltip-status {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.th-tooltip-desc {
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+/* ─── Valuation source labels ─── */
+.val-label {
+  display: inline-block;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 1px 5px;
+  border-radius: 3px;
+  margin-left: 5px;
+  vertical-align: middle;
+}
+
+.val-label-secondary {
+  color: var(--green);
+  background: rgba(91, 168, 138, 0.12);
+  border: 1px solid rgba(91, 168, 138, 0.25);
+}
+
+.val-label-round {
+  color: var(--text-muted);
+  background: rgba(233, 233, 221, 0.05);
+  border: 1px solid var(--border);
+}
